@@ -37,5 +37,9 @@
     "svelte": "^5.58.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.8"
-  }
+  },
+  "overrides": {
+    "sjcl": "1.0.8"
+  },
+  "//": "sjcl pinned to 1.0.8: 1.0.9 produced blind signatures that fail independent verification at tally (caught by tests). GHSA-2w8x-224x-785m affects sjcl.ecc only, which is not used."
 }
