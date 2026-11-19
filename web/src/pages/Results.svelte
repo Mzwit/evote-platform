@@ -30,59 +30,89 @@
     }
     return [...m.values()];
   });
-  const label = (s: string) => (s === 'DECLARED' ? t.declared : s === 'VERIFIED' ? t.verified : t.preliminary);
+  const statusOf = (s: string) => s === 'DECLARED' ? ['declared', 'Officially declared'] : s === 'VERIFIED' ? ['verified', 'Verified by the auditor, not yet declared'] : s === 'TALLIED' ? ['prelim', 'Preliminary, not yet verified'] : s === 'OPEN' ? ['open', 'Voting open'] : ['other', s.charAt(0) + s.slice(1).toLowerCase()];
+  const n = (x: number) => Number(x).toLocaleString();
+  const checkNames: Record<string, string> = { noBallotWithoutToken: 'Every ballot carries a valid voting pass', boardMatchesAccepted: 'Public list matches accepted ballots', tallyMatchesAccepted: 'Count matches accepted ballots' };
 </script>
 
-<h1>{t.results}</h1>
-{#if error}<p class="notice bad" role="alert">{error}</p>{/if}
-{#if elections.length > 1}
-  <label for="el">{t.election}</label>
-  <select id="el" value={sel} onchange={(e) => load((e.target as HTMLSelectElement).value)}>
-    {#each elections as e}<option value={e.id}>{e.name}</option>{/each}
-  </select>
-{/if}
+<div class="section" style="margin-top:0">
+  <h1>{t.results}</h1>
+  {#if elections.length > 1}
+    <label class="field" for="el">{t.election}</label>
+    <select id="el" style="max-width:32rem" value={sel} onchange={(e) => load((e.target as HTMLSelectElement).value)}>
+      {#each elections as e}<option value={e.id}>{e.name}</option>{/each}
+    </select>
+  {/if}
+</div>
+{#if error}<div class="msg bad" role="alert">{error}</div>{/if}
 
 {#if data}
-  <h2>{data.info.name}</h2>
-  <p class="muted">Status: {data.info.status}</p>
-  <div class="card">
-    <strong>{t.turnout}: {data.turnout.turnoutPct}%</strong>
-    <div class="muted">{t.participated}: {data.turnout.participated.toLocaleString()} · {t.registered}: {data.turnout.eligible.toLocaleString()}</div>
+  {@const st = statusOf(data.results.available ? data.results.status : data.info.status)}
+  <div style="margin-top:1.4rem; display:flex; flex-wrap:wrap; gap:.8rem; align-items:center; justify-content:space-between">
+    <h2>{data.info.name}</h2>
+    <span class="status {st[0]}" role="status">{st[1]}</span>
   </div>
-  <details class="card">
-    <summary>Reconciliation checks</summary>
-    <table>
-      <tbody>
-        <tr><td>Anonymous tokens issued</td><td class="num">{data.rec.tokensIssued}</td></tr>
-        <tr><td>Ballots accepted</td><td class="num">{data.rec.ballotsAccepted}</td></tr>
-        <tr><td>Entries on public bulletin board</td><td class="num">{data.rec.boardEntries}</td></tr>
-        <tr><td>Ballots counted</td><td class="num">{data.rec.ballotsDecrypted}</td></tr>
-      </tbody>
-    </table>
-    {#each Object.entries(data.rec.checks) as [k, ok]}<div class={ok ? 'ok' : 'error'}>{ok ? '✓' : '✗'} {k.replace(/([A-Z])/g, ' $1').toLowerCase()}</div>{/each}
-  </details>
+
+  <div class="stats">
+    <div class="stat"><div class="n">{data.turnout.turnoutPct}%</div><div class="l">{t.turnout}</div></div>
+    <div class="stat"><div class="n">{n(data.turnout.participated)}</div><div class="l">{t.participated}</div></div>
+    <div class="stat"><div class="n">{n(data.turnout.eligible)}</div><div class="l">{t.registered}</div></div>
+    <div class="stat"><div class="n">{n(data.rec.ballotsAccepted)}</div><div class="l">Ballots recorded</div></div>
+  </div>
+
+  <div class="panel">
+    <h3>Turnout by inkhundla</h3>
+    <div class="bars">
+      {#each data.turnout.constituencies as k}
+        {@const pct = k.eligible ? (100 * k.participated) / k.eligible : 0}
+        <div class="bar-row"><span class="who">{k.name} <span class="muted">· {k.region}</span></span><div class="bar"><div style="width:{pct}%"></div></div><span class="num">{pct.toFixed(1)}%</span></div>
+      {/each}
+    </div>
+  </div>
 
   {#if !data.results.available}
-    <p class="notice">{t.notYet}</p>
+    <div class="msg info">{t.notYet}</div>
   {:else}
-    <p class="notice {data.results.status === 'DECLARED' ? 'good' : 'warn'}" role="status"><strong>{label(data.results.status)}</strong></p>
-    <p class="muted">Ballots counted: {data.results.summary.ballots_total} · valid {data.results.summary.valid} · rejected {data.results.summary.invalid}</p>
-    <h2>By constituency</h2>
-    {#each groups as g}
-      <div class="card">
-        <strong>{g.name}</strong> <span class="muted">({g.region})</span>
-        {#each [...g.contests.entries()] as [contest, rows]}
-          <table style="margin-top:.5rem">
-            <caption class="muted" style="text-align:left">{contest}</caption>
-            <thead><tr><th>Candidate</th><th class="num">Votes</th></tr></thead>
-            <tbody>{#each rows as r}<tr><td>{r.candidate}</td><td class="num">{r.votes}</td></tr>{/each}</tbody>
-          </table>
-        {/each}
-      </div>
-    {/each}
-    <details class="card"><summary>Audit fingerprints</summary>
-      <div class="muted">Bulletin board head: <code>{data.results.summary.board_head}</code></div>
-      <div class="muted">Published decrypted ballots hash: <code>{data.results.summary.decrypted_hash}</code></div>
-    </details>
+    <p class="muted">Ballots counted {n(data.results.summary.ballots_total)} · valid {n(data.results.summary.valid)} · rejected {n(data.results.summary.invalid)}</p>
+    <div class="grid-2">
+      {#each groups as g}
+        <section class="panel">
+          <h2>{g.name}</h2>
+          <p class="muted">{g.region}</p>
+          {#each [...g.contests.entries()] as [contest, rows]}
+            {@const max = Math.max(1, ...rows.map((r: any) => r.votes))}
+            {@const total = rows.reduce((s: number, r: any) => s + r.votes, 0)}
+            <h3 style="margin-top:1.1rem">{contest}</h3>
+            <div class="bars">
+              {#each rows as r, i}
+                <div class="bar-row" class:lead={i === 0 && r.votes > 0}>
+                  <span class="who">{r.candidate}</span>
+                  <div class="bar"><div style="width:{(100 * r.votes) / max}%"></div></div>
+                  <span class="num" title="{total ? ((100 * r.votes) / total).toFixed(1) : 0}%">{n(r.votes)}</span>
+                </div>
+              {/each}
+            </div>
+          {/each}
+        </section>
+      {/each}
+    </div>
   {/if}
+
+  <details class="panel">
+    <summary>Integrity checks anyone can repeat</summary>
+    <div style="margin-top:.6rem">
+      {#each Object.entries(data.rec.checks) as [k, ok]}<div class="check {ok ? 'ok' : 'no'}"><strong>{ok ? '✓' : '✗'}</strong> {checkNames[k] ?? k}</div>{/each}
+    </div>
+    <table style="margin-top:.8rem">
+      <tbody>
+        <tr><td>Voting passes issued</td><td class="num">{n(data.rec.tokensIssued)}</td></tr>
+        <tr><td>Ballots accepted</td><td class="num">{n(data.rec.ballotsAccepted)}</td></tr>
+        <tr><td>Entries on the public list</td><td class="num">{n(data.rec.boardEntries)}</td></tr>
+        <tr><td>Ballots counted</td><td class="num">{n(data.rec.ballotsDecrypted)}</td></tr>
+      </tbody>
+    </table>
+    {#if data.results.available}
+      <p class="muted" style="margin-top:.8rem">Public list fingerprint <span class="mono">{data.results.summary.board_head.slice(0, 16)}</span><br />Counted ballots fingerprint <span class="mono">{data.results.summary.decrypted_hash.slice(0, 16)}</span></p>
+    {/if}
+  </details>
 {/if}

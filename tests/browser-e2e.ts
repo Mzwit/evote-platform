@@ -5,7 +5,9 @@ import { chromium, devices } from 'playwright-core';
 import { readFileSync, mkdirSync } from 'node:fs';
 
 const BASE = process.env.BASE ?? 'http://localhost:8080';
-const demo = JSON.parse(readFileSync('seed-output/demo.json', 'utf8'));
+// Voters come from the public demo endpoint when the server runs in DEMO_MODE, else from the seed output.
+const pub = await fetch(BASE + '/api/public/demo').then((r) => r.json()).catch(() => ({ enabled: false }));
+const demo = pub.enabled ? { voters: { firstNationalId: '0', password: pub.password }, ids: pub.nationalIds } : JSON.parse(readFileSync('seed-output/demo.json', 'utf8'));
 const axe = readFileSync(new URL('../node_modules/axe-core/axe.min.js', import.meta.url), 'utf8');
 mkdirSync('docs/screenshots', { recursive: true });
 
@@ -43,20 +45,21 @@ for (const p of profiles) {
     const firstScreen = Date.now() - t0;
     await a11y(page, `${name}: home`);
     await page.screenshot({ path: `docs/screenshots/${name}-1-home.png` });
-    await page.getByRole('link', { name: 'Vote', exact: true }).click();
-    const nid = String(BigInt(demo.voters.firstNationalId) + BigInt(voter + Math.floor(Math.random() * 600) * 3));
+    await page.getByRole('link', { name: 'Vote', exact: true }).first().click();
+    const nid = demo.ids ? demo.ids[profiles.findIndex((x) => x.name === name)] : String(BigInt(demo.voters.firstNationalId) + BigInt(voter + Math.floor(Math.random() * 600) * 3));
     await page.getByLabel('National ID number').fill(nid);
     await page.getByLabel('Password').fill(demo.voters.password);
     await a11y(page, `${name}: sign in`);
     await page.getByRole('button', { name: 'Continue' }).click();
     await page.getByLabel('One-time code').waitFor();
     await page.getByRole('button', { name: 'Continue' }).click();
-    await page.getByRole('button', { name: 'Start voting' }).first().click();
+    await page.locator('.cand, button:has-text("Start voting")').first().waitFor();
+    if (await page.getByRole('button', { name: 'Start voting' }).count()) await page.getByRole('button', { name: 'Start voting' }).first().click();
     for (let i = 0; i < 3; i++) {
-      await page.locator('.choice').first().waitFor();
+      await page.locator('.cand').first().waitFor();
       if (i === 0) { await a11y(page, `${name}: ballot`); await page.screenshot({ path: `docs/screenshots/${name}-2-ballot.png` }); }
-      await page.locator('.choice').nth(i % 3).click();
-      await page.getByRole('button', { name: 'Continue' }).click();
+      await page.locator('.cand').nth(i % 3).click();
+      await page.getByRole('button', { name: /Next contest|Check my choices/ }).click();
     }
     await page.getByRole('heading', { name: 'Check your choices' }).waitFor();
     await a11y(page, `${name}: review`);
@@ -65,10 +68,10 @@ for (const p of profiles) {
     await page.getByRole('button', { name: 'Cast my vote' }).click();
     await page.getByRole('heading', { name: 'Your vote has been recorded' }).waitFor({ timeout: 60000 });
     const castMs = Date.now() - c0;
-    const tracker = (await page.locator('.tracker').textContent())!.trim();
+    const tracker = (await page.locator('.code').getAttribute('aria-label'))!.trim();
     await a11y(page, `${name}: receipt`);
     await page.screenshot({ path: `docs/screenshots/${name}-4-receipt.png` });
-    await page.getByRole('link', { name: 'Check my receipt' }).click();
+    await page.locator('main').getByRole('link', { name: 'Check my receipt' }).click();
     await page.waitForTimeout(2500); // the sealer appends to the board every second
     await page.getByRole('button', { name: 'Check' }).click();
     await page.getByText('Found on the public bulletin board.').waitFor({ timeout: 15000 });

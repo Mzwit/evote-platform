@@ -17,19 +17,24 @@
   }
 </script>
 
-<h1>{t.receiptTitle}</h1>
-<form onsubmit={(e) => { e.preventDefault(); check(); }}>
-  <label for="el">{t.election}</label>
-  <select id="el" bind:value={election}>{#each elections as e}<option value={e.id}>{e.name}</option>{/each}</select>
-  <label for="tr">{t.tracker}</label>
-  <input id="tr" autocapitalize="characters" autocomplete="off" placeholder="XXXX-XXXX-XXXX-XXXX-XXXX" required bind:value={tracker} />
-  <div class="row"><button>{t.check}</button></div>
-</form>
-{#if error}<p class="notice bad" role="alert">{error}</p>{/if}
-{#if result}
-  <div class="notice {result.onBoard ? 'good' : result.found ? 'warn' : 'bad'}" role="status">
-    {result.onBoard ? t.onBoard : result.found ? t.pending : t.notFound}
-    {#if result.onBoard}<div class="muted">Position {result.position} · entry <code>{result.entry_hash.slice(0, 16)}…</code></div>{/if}
-  </div>
-  <p class="muted">This shows your ballot was recorded. It cannot show how you voted. If you are told otherwise, that is not true.</p>
-{/if}
+<div class="narrow">
+  <h1>{t.receiptTitle}</h1>
+  <p class="muted">Every accepted ballot appears on a public list. Enter your tracking code to find yours.</p>
+  <form class="slip" style="margin-top:1.2rem" onsubmit={(e) => { e.preventDefault(); check(); }}>
+    {#if elections.length > 1}
+      <label class="field" for="el" style="margin-top:0">{t.election}</label>
+      <select id="el" bind:value={election}>{#each elections as e}<option value={e.id}>{e.name}</option>{/each}</select>
+    {/if}
+    <label class="field" for="tr" style={elections.length > 1 ? '' : 'margin-top:0'}>{t.tracker}</label>
+    <input id="tr" class="big mono" autocapitalize="characters" autocomplete="off" placeholder="XXXX-XXXX-XXXX-XXXX-XXXX" required bind:value={tracker} />
+    <div class="actions"><button class="btn block">{t.check}</button></div>
+  </form>
+  {#if error}<div class="msg bad" role="alert">{error}</div>{/if}
+  {#if result}
+    <div class="msg {result.onBoard ? 'good' : result.found ? 'warn' : 'bad'}" role="status">
+      <strong>{result.onBoard ? t.onBoard : result.found ? t.pending : t.notFound}</strong>
+      {#if result.onBoard}<div class="muted" style="margin-top:.3rem">Entry {result.position.toLocaleString()} on the board · fingerprint <span class="mono">{result.entry_hash.slice(0, 12)}</span></div>{/if}
+    </div>
+    <p class="muted">This shows that your ballot was recorded. It cannot show how you voted, so nobody can use it to check your choice.</p>
+  {/if}
+</div>

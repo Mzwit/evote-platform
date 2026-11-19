@@ -40,7 +40,7 @@ export async function createDemoElection(opts: { voters: number; open: boolean; 
   const now = Date.now();
   const e = (await db.query(`INSERT INTO cfg.elections(name, description, opens_at, closes_at, parties_enabled, trustee_count, trustee_threshold, close_grace_s, created_by)
     VALUES ($1,$2,$3,$4,false,5,3,$6,$5) RETURNING id`, [
-    `Secondary Elections DEMO ${new Date().toISOString().slice(0, 16)}`,
+    'Secondary Elections (demo)',
     'Demonstration election with fictional candidates and voters. Not a real election.',
     new Date(now - 60_000), new Date(now + (opts.windowHours ?? 12) * 3600_000), ids.admin1, opts.graceSeconds ?? 5])).rows[0];
 

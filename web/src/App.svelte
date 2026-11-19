@@ -13,19 +13,33 @@
   window.addEventListener('hashchange', () => { route = location.hash.slice(1) || '/'; window.scrollTo(0, 0); });
   onNetworkState((s) => (net = s));
   const path = $derived(route.split('?')[0]);
+  const cur = (p: string) => (path === p || (p !== '/' && path.startsWith(p)) ? 'page' : undefined);
   function changeLang(e: Event) { setLang((e.target as HTMLSelectElement).value as any); langKey++; }
 </script>
 
-<header class="top">
-  <a class="brand" href="#/">{t.appName}</a>
-  <label class="sr-only" for="lang">{t.language}</label>
-  <select id="lang" style="width:auto" onchange={changeLang} value={lang()}>
-    {#each Object.entries(languages) as [k, v]}<option value={k}>{v}</option>{/each}
-  </select>
+<div class="demo-strip" role="note">{t.prototype}</div>
+<header class="topbar">
+  <div class="topbar-inner">
+    <a class="brand" href="#/" aria-label="{t.appName} home">
+      <svg viewBox="0 0 34 34" aria-hidden="true">
+        <rect x="3" y="15" width="28" height="16" rx="4" fill="var(--ink)" />
+        <rect x="9" y="17.5" width="16" height="2.5" rx="1.25" fill="var(--paper)" />
+        <rect x="10" y="3" width="14" height="17" rx="2" fill="var(--slip)" stroke="var(--ink)" stroke-width="2" />
+        <path d="M13.5 11.5l2.6 2.6 4.6-5.2" fill="none" stroke="var(--seal)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
+      {t.appName}
+    </a>
+    <nav class="nav" aria-label="Main">
+      <a href="#/vote" aria-current={cur('/vote')}>{t.vote}</a>
+      <a href="#/results" aria-current={cur('/results')}>{t.results}</a>
+      <a class="hide-sm" href="#/verify" aria-current={cur('/verify')}>{t.checkReceipt}</a>
+      <label class="sr-only" for="lang">{t.language}</label>
+      <select id="lang" onchange={changeLang} value={lang()}>
+        {#each Object.entries(languages) as [k, v]}<option value={k}>{v}</option>{/each}
+      </select>
+    </nav>
+  </div>
 </header>
-<div class="banner" role="note">{t.prototype}</div>
-{#if net.waiting}<div class="notice warn" role="status" aria-live="polite" style="margin:.5rem 1rem">{t.waiting}</div>{/if}
-{#if net.offline}<div class="notice bad" role="status" aria-live="polite" style="margin:.5rem 1rem">{t.offline}</div>{/if}
 
 <main id="main">
   {#key langKey}
@@ -36,3 +50,6 @@
     {:else}<Home />{/if}
   {/key}
 </main>
+
+{#if net.waiting}<div class="net" role="status" aria-live="polite">{t.waiting}</div>
+{:else if net.offline}<div class="net" role="status" aria-live="polite">{t.offline}</div>{/if}
