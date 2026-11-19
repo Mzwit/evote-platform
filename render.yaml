@@ -1,0 +1,40 @@
+# Render Blueprint: public DEMO of the voting platform (fictional data only).
+# The database is a free Neon PostgreSQL project: paste its DIRECT (not "-pooler")
+# connection string into DATABASE_URL when Render asks for it.
+services:
+  - type: web
+    name: evote-demo
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm run start:hosted
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22.18.0"
+      - key: NODE_ENV
+        value: production
+      - key: DEMO_MODE
+        value: "1"
+      - key: WORKERS
+        value: "1"
+      - key: DB_POOL_SIZE
+        value: "3"
+      - key: MAX_INFLIGHT
+        value: "64"
+      - key: DATABASE_URL
+        sync: false
+      - key: IDENTITY_DB_PASSWORD
+        generateValue: true
+      - key: BALLOT_DB_PASSWORD
+        generateValue: true
+      - key: ADMIN_DB_PASSWORD
+        generateValue: true
+      - key: KEK_BASE64
+        generateValue: true
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: OTP_PEPPER
+        generateValue: true

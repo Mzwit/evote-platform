@@ -1,0 +1,33 @@
+# Patroni: 3 PostgreSQL nodes per site, automatic failover, SYNCHRONOUS replication
+# so a ballot is on two servers before the voter sees "accepted" (RPO = 0).
+scope: evote
+name: pg-a1
+restapi: { listen: 0.0.0.0:8008, connect_address: pg-a1:8008 }
+etcd3: { hosts: [etcd-1:2379, etcd-2:2379, etcd-3:2379] }
+bootstrap:
+  dcs:
+    ttl: 30
+    loop_wait: 10
+    retry_timeout: 10
+    maximum_lag_on_failover: 0
+    synchronous_mode: true
+    synchronous_mode_strict: true      # refuse writes rather than accept them without a replica
+    synchronous_node_count: 1
+    postgresql:
+      use_pg_rewind: true
+      parameters:
+        synchronous_commit: "on"
+        wal_level: replica
+        max_wal_senders: 10
+        max_connections: 400
+        archive_mode: "on"
+        archive_command: "pgbackrest --stanza=evote archive-push %p"
+        data_checksums: "on"
+        ssl: "on"
+postgresql:
+  listen: 0.0.0.0:5432
+  connect_address: pg-a1:5432
+  data_dir: /var/lib/postgresql/16/main
+  authentication:
+    replication: { username: replicator, password: "${PATRONI_REPLICATION_PASSWORD}" }
+    superuser: { username: postgres, password: "${PATRONI_SUPERUSER_PASSWORD}" }

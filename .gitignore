@@ -1,0 +1,6 @@
+node_modules/
+web/dist/
+seed-output/
+tests/load/k6-data.json
+.env
+*.log

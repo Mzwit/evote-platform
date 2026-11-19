@@ -1,0 +1,41 @@
+{
+  "name": "evote-platform",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Reference implementation of a secure, verifiable electronic voting platform (prototype - not certified).",
+  "type": "module",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "migrate": "node server/src/migrate.ts",
+    "seed": "node server/src/seed.ts",
+    "start": "node server/src/index.ts",
+    "dev:web": "vite --config web/vite.config.ts",
+    "build": "vite build --config web/vite.config.ts && node scripts/check-bundle.ts",
+    "test": "node --test --test-concurrency=1 tests/unit.test.ts tests/election-flow.test.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "load": "node scripts/loadtest.ts",
+    "start:hosted": "node server/src/bootstrap.ts && node server/src/index.ts"
+  },
+  "dependencies": {
+    "@cloudflare/blindrsa-ts": "^0.4.4",
+    "@fastify/static": "^10.1.11",
+    "@hpke/core": "^1.10.1",
+    "fastify": "^5.12.8",
+    "pg": "^8.23.1",
+    "prom-client": "^15.1.3",
+    "shamir-secret-sharing": "^0.0.4"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7.3.1",
+    "@types/node": "^26.6.6",
+    "@types/pg": "^8.23.1",
+    "axe-core": "^4.14.1",
+    "playwright-core": "^1.65.1",
+    "svelte": "^5.58.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8"
+  }
+}

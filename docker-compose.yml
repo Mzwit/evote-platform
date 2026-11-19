@@ -1,0 +1,78 @@
+# Pilot / evaluation deployment on ONE machine (Mode A). Not for national use:
+# national scale uses infra/k8s on two sites with Patroni-managed PostgreSQL.
+# Secrets come from an .env file that is never committed (see .env.example).
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: evote
+      POSTGRES_USER: evote
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+    command: ["postgres", "-c", "synchronous_commit=on", "-c", "max_connections=300", "-c", "wal_level=replica", "-c", "archive_mode=on", "-c", "archive_command=test ! -f /wal-archive/%f && cp %p /wal-archive/%f"]
+    volumes: [pgdata:/var/lib/postgresql/data, walarchive:/wal-archive]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U evote"], interval: 5s, retries: 20 }
+    networks: [data]
+
+  migrate:
+    build: .
+    command: ["node", "server/src/migrate.ts"]
+    environment:
+      DATABASE_URL_OWNER: postgres://evote:${POSTGRES_PASSWORD}@postgres:5432/evote
+      DATABASE_URL_IDENTITY: postgres://evote_identity:dev-identity@postgres:5432/evote
+      DATABASE_URL_BALLOT: postgres://evote_ballot:dev-ballot@postgres:5432/evote
+      DATABASE_URL_ADMIN: postgres://evote_admin:dev-admin@postgres:5432/evote
+      KEK_BASE64: ${KEK_BASE64:?}
+      SESSION_SECRET: ${SESSION_SECRET:?}
+      OTP_PEPPER: ${OTP_PEPPER:?}
+    depends_on: { postgres: { condition: service_healthy } }
+    networks: [data]
+
+  # Identity + admin + public in one service, the anonymous cast service separately,
+  # so the cast path can run on hosts that never see identity traffic or logs.
+  api:
+    build: .
+    deploy: { replicas: 2 }
+    read_only: true
+    environment: &appenv
+      SERVICES: identity,admin,public
+      WORKERS: "0"
+      DATABASE_URL_IDENTITY: postgres://evote_identity:${IDENTITY_DB_PASSWORD:-dev-identity}@postgres:5432/evote
+      DATABASE_URL_BALLOT: postgres://evote_ballot:${BALLOT_DB_PASSWORD:-dev-ballot}@postgres:5432/evote
+      DATABASE_URL_ADMIN: postgres://evote_admin:${ADMIN_DB_PASSWORD:-dev-admin}@postgres:5432/evote
+      KEK_BASE64: ${KEK_BASE64:?}
+      SESSION_SECRET: ${SESSION_SECRET:?}
+      OTP_PEPPER: ${OTP_PEPPER:?}
+      SMS_GATEWAY_URL: ${SMS_GATEWAY_URL:-}
+      SMS_GATEWAY_TOKEN: ${SMS_GATEWAY_TOKEN:-}
+    depends_on: { migrate: { condition: service_completed_successfully } }
+    networks: [edge, data]
+  cast:
+    build: .
+    deploy: { replicas: 2 }
+    read_only: true
+    environment:
+      <<: *appenv
+      SERVICES: cast,public
+    depends_on: { migrate: { condition: service_completed_successfully } }
+    networks: [edge, data]
+
+  haproxy:
+    image: haproxy:3.0
+    ports: ["443:443", "80:80"]
+    volumes: ["./infra/haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro", "./infra/haproxy/certs:/certs:ro"]
+    depends_on: [api, cast]
+    networks: [edge]
+
+  prometheus:
+    image: prom/prometheus:v3.0.0
+    volumes: ["./infra/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro"]
+    networks: [edge]
+  grafana:
+    image: grafana/grafana:11.3.0
+    ports: ["127.0.0.1:3000:3000"]
+    networks: [edge]
+
+volumes: { pgdata: {}, walarchive: {} }
+networks:
+  edge: {}
+  data: { internal: true }   # the database network has no route to the internet

@@ -1,0 +1,23 @@
+groups:
+- name: evote
+  rules:
+  - alert: BallotErrorsRising
+    expr: sum(rate(evote_http_seconds_count{route="/api/cast",code=~"5.."}[5m])) > 0
+    for: 2m
+    labels: { severity: critical }
+    annotations: { summary: "Server errors on ballot casting" }
+  - alert: CastLatencyHigh
+    expr: histogram_quantile(0.95, sum by (le) (rate(evote_http_seconds_bucket{route="/api/cast"}[5m]))) > 0.5
+    for: 5m
+    labels: { severity: warning }
+    annotations: { summary: "p95 cast latency above 500 ms target" }
+  - alert: WaitingRoomActive
+    expr: sum(evote_admission_queued) > 1000
+    for: 2m
+    labels: { severity: warning }
+    annotations: { summary: "Waiting room has more than 1000 queued requests: add capacity" }
+  - alert: BoardLagging
+    expr: (sum(evote_ballots_accepted_total) - sum(evote_board_height)) > 5000
+    for: 2m
+    labels: { severity: critical }
+    annotations: { summary: "Bulletin board sealing is behind" }

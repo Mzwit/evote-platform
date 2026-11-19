@@ -1,0 +1,133 @@
+# National-scale deployment on K3s (one cluster per site; site B mirrors site A).
+# PostgreSQL runs under Patroni (see infra/postgres/patroni.yml) with synchronous
+# replication; secrets come from OpenBao via the External Secrets operator.
+apiVersion: v1
+kind: Namespace
+metadata: { name: evote, labels: { pod-security.kubernetes.io/enforce: restricted } }
+---
+# Identity + admin + public API
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: api, namespace: evote }
+spec:
+  replicas: 6
+  selector: { matchLabels: { app: api } }
+  template:
+    metadata: { labels: { app: api } }
+    spec:
+      automountServiceAccountToken: false
+      securityContext: { runAsNonRoot: true, seccompProfile: { type: RuntimeDefault } }
+      topologySpreadConstraints: [{ maxSkew: 1, topologyKey: kubernetes.io/hostname, whenUnsatisfiable: DoNotSchedule, labelSelector: { matchLabels: { app: api } } }]
+      containers:
+      - name: api
+        image: ghcr.io/OWNER/evote:VERSION   # pinned by digest in production
+        env:
+        - { name: SERVICES, value: "identity,admin,public" }
+        - { name: WORKERS, value: "1" }
+        - { name: MAX_INFLIGHT, value: "256" }
+        envFrom: [{ secretRef: { name: evote-secrets } }]
+        ports: [{ containerPort: 8080 }]
+        readinessProbe: { httpGet: { path: /readyz, port: 8080 }, periodSeconds: 5 }
+        livenessProbe: { httpGet: { path: /healthz, port: 8080 }, periodSeconds: 10 }
+        resources: { requests: { cpu: "2", memory: 1Gi }, limits: { cpu: "4", memory: 2Gi } }
+        securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
+---
+# Anonymous cast service: separate pods, separate node pool, no identity secrets.
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: cast, namespace: evote }
+spec:
+  replicas: 4
+  selector: { matchLabels: { app: cast } }
+  template:
+    metadata: { labels: { app: cast } }
+    spec:
+      automountServiceAccountToken: false
+      nodeSelector: { evote/pool: cast }
+      securityContext: { runAsNonRoot: true, seccompProfile: { type: RuntimeDefault } }
+      containers:
+      - name: cast
+        image: ghcr.io/OWNER/evote:VERSION
+        env:
+        - { name: SERVICES, value: "cast,public" }
+        - { name: WORKERS, value: "1" }
+        envFrom: [{ secretRef: { name: evote-cast-secrets } }]   # ballot-role DB URL + KEK only
+        ports: [{ containerPort: 8080 }]
+        readinessProbe: { httpGet: { path: /readyz, port: 8080 }, periodSeconds: 5 }
+        resources: { requests: { cpu: "1", memory: 512Mi }, limits: { cpu: "2", memory: 1Gi } }
+        securityContext: { allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: { drop: [ALL] } }
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: { name: api, namespace: evote }
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: api }
+  minReplicas: 6
+  maxReplicas: 40
+  metrics: [{ type: Resource, resource: { name: cpu, target: { type: Utilization, averageUtilization: 60 } } }]
+  behavior: { scaleDown: { stabilizationWindowSeconds: 900 } }   # never shrink quickly on election day
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: { name: cast, namespace: evote }
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: cast }
+  minReplicas: 4
+  maxReplicas: 20
+  metrics: [{ type: Resource, resource: { name: cpu, target: { type: Utilization, averageUtilization: 60 } } }]
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: { name: api, namespace: evote }
+spec: { minAvailable: "80%", selector: { matchLabels: { app: api } } }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: { name: cast, namespace: evote }
+spec: { minAvailable: "80%", selector: { matchLabels: { app: cast } } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: api, namespace: evote }
+spec: { selector: { app: api }, ports: [{ port: 80, targetPort: 8080 }] }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: cast, namespace: evote }
+spec: { selector: { app: cast }, ports: [{ port: 80, targetPort: 8080 }] }
+---
+# Network segmentation: only the ingress reaches the apps; apps reach only PostgreSQL (and SMS for api).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: default-deny, namespace: evote }
+spec: { podSelector: {}, policyTypes: [Ingress, Egress] }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: apps, namespace: evote }
+spec:
+  podSelector: { matchExpressions: [{ key: app, operator: In, values: [api, cast] }] }
+  policyTypes: [Ingress, Egress]
+  ingress: [{ from: [{ namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: ingress } } }, { namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: monitoring } } }], ports: [{ port: 8080 }] }]
+  egress:
+  - to: [{ namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: database } } }]
+    ports: [{ port: 5432 }]
+  - to: [{ namespaceSelector: {}, podSelector: { matchLabels: { k8s-app: kube-dns } } }]
+    ports: [{ port: 53, protocol: UDP }]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: evote
+  namespace: evote
+  annotations:
+    haproxy.org/ssl-redirect: "true"
+spec:
+  ingressClassName: haproxy
+  tls: [{ hosts: [vote.example.sz], secretName: evote-tls }]
+  rules:
+  - host: vote.example.sz
+    http:
+      paths:
+      - { path: /api/cast, pathType: Prefix, backend: { service: { name: cast, port: { number: 80 } } } }
+      - { path: /, pathType: Prefix, backend: { service: { name: api, port: { number: 80 } } } }

@@ -1,0 +1,34 @@
+name: ci
+on: [push, pull_request]
+permissions: { contents: read }
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16
+        env: { POSTGRES_DB: evote, POSTGRES_USER: evote, POSTGRES_PASSWORD: evote }
+        ports: ["5432:5432"]
+        options: --health-cmd pg_isready --health-interval 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22.18", cache: npm }
+      - run: npm ci
+      - run: psql postgres://evote:evote@localhost:5432/evote -c 'ALTER ROLE evote CREATEROLE' || true
+      - run: npm test
+      - run: npm run build   # fails if the voter JavaScript exceeds 150 KB gzip
+      - run: npm audit --omit=dev --audit-level=high
+  supply-chain:
+    runs-on: ubuntu-24.04
+    needs: test
+    permissions: { contents: read, packages: write, id-token: write }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aquasecurity/trivy-action@0.28.0
+        with: { scan-type: fs, severity: "CRITICAL,HIGH", exit-code: "1" }
+      - uses: anchore/sbom-action@v0
+        with: { format: spdx-json, output-file: sbom.spdx.json }
+      - uses: actions/upload-artifact@v4
+        with: { name: sbom, path: sbom.spdx.json }
+      # Image build, push and `cosign sign` run here on tagged releases only.
