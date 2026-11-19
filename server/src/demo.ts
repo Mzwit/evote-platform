@@ -2,6 +2,7 @@
 import pg from 'pg';
 import { config } from './config.ts';
 import { hashPassword, base32 } from './security.ts';
+import { randomBytes } from 'node:crypto';
 import { requestOrApprove } from './elections.ts';
 import { migrate } from './migrate.ts';
 
@@ -27,13 +28,16 @@ export async function createDemoElection(opts: { voters: number; open: boolean; 
     ['trustee1', 'Demo Trustee 1', ['TRUSTEE']], ['trustee2', 'Demo Trustee 2', ['TRUSTEE']], ['trustee3', 'Demo Trustee 3', ['TRUSTEE']],
     ['trustee4', 'Demo Trustee 4', ['TRUSTEE']], ['trustee5', 'Demo Trustee 5', ['TRUSTEE']],
   ] as const;
-  const pwHash = await hashPassword(DEMO_OFFICIAL_PASSWORD);
+  // Hosted (public) demos get a random officials' password and random TOTP secrets,
+  // printed once to the private service log. Local development keeps fixed values.
+  const officialPassword = config.isProd ? randomBytes(12).toString('base64url') : DEMO_OFFICIAL_PASSWORD;
+  const pwHash = await hashPassword(officialPassword);
   const ids: Record<string, string> = {};
   const totp: Record<string, string> = {};
   for (const [u, name, roles] of officials) {
-    const secret = Buffer.from(`demo-totp-secret-${u}`.padEnd(20, '.').slice(0, 20));
+    const secret = config.isProd ? randomBytes(20) : Buffer.from(`demo-totp-secret-${u}`.padEnd(20, '.').slice(0, 20));
     const r = await db.query(`INSERT INTO adm.officials(username, full_name, password_hash, totp_secret, roles) VALUES ($1,$2,$3,$4,$5)
-       ON CONFLICT (username) DO UPDATE SET full_name=EXCLUDED.full_name RETURNING id`, [u, name, pwHash, secret, roles]);
+       ON CONFLICT (username) DO UPDATE SET full_name=EXCLUDED.full_name, password_hash=EXCLUDED.password_hash, totp_secret=EXCLUDED.totp_secret RETURNING id`, [u, name, pwHash, secret, roles]);
     ids[u] = r.rows[0].id; totp[u] = base32(secret);
   }
 
@@ -77,7 +81,7 @@ export async function createDemoElection(opts: { voters: number; open: boolean; 
   await db.end();
 
   const out: Record<string, unknown> = { officialIds: ids, electionId: e.id, voters: { count: N, firstNationalId: String(base), password: DEMO_VOTER_PASSWORD },
-    officials: { password: DEMO_OFFICIAL_PASSWORD, totpSecrets: totp } };
+    officials: { password: officialPassword, totpSecrets: totp } };
   if (OPEN) {
     const o = (u: string, roles: string[]) => ({ id: ids[u], username: u, roles });
     await requestOrApprove(e.id, 'publish', o('admin1', ['NATIONAL_ADMIN']), 'demo setup');

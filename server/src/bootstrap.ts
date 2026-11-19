@@ -7,6 +7,9 @@ import { migrate } from './migrate.ts';
 import { config } from './config.ts';
 import { pools, closePools } from './db.ts';
 import { createDemoElection } from './demo.ts';
+import { randomBytes } from 'node:crypto';
+import { hashPassword, base32 } from './security.ts';
+import { audit } from './audit.ts';
 
 await migrate();
 if (config.demoMode) {
@@ -18,6 +21,21 @@ if (config.demoMode) {
     console.log('=== keep the officials TOTP secrets and trustee shares private ===');
   } else {
     console.log(`demo mode: ${n} election(s) already exist, nothing to create`);
+    // Replace any predictable development credentials on a hosted demo.
+    const weak = (await pools.admin.query("SELECT username FROM adm.officials WHERE position('demo-totp-secret' in convert_from(totp_secret, 'LATIN1')) = 1")).rows;
+    if (weak.length && config.isProd) {
+      const password = randomBytes(12).toString('base64url');
+      const hash = await hashPassword(password);
+      const secrets: Record<string, string> = {};
+      for (const { username } of weak) {
+        const s = randomBytes(20);
+        await pools.admin.query('UPDATE adm.officials SET password_hash=$2, totp_secret=$3, failed_logins=0, locked_until=NULL WHERE username=$1', [username, hash, s]);
+        secrets[username] = base32(s);
+      }
+      await audit(pools.admin, 'system', 'officials.credentials_rotated', { count: weak.length });
+      console.log('=== DEMO OFFICIAL CREDENTIALS ROTATED (keep private) ===');
+      console.log(JSON.stringify({ password, totpSecrets: secrets }, null, 2));
+    }
   }
 }
 await closePools();
